@@ -1,0 +1,12 @@
+.gradle/
+build/
+*/build/
+.kotlin/
+local.properties
+.idea/
+*.iml
+.DS_Store
+# Signing keys are secrets – keep them out of git
+*.jks
+*.keystore
+keystore.properties

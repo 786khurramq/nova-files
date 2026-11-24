@@ -1,0 +1,56 @@
+# Nova Files — Spectrum Flow
+
+Milestone 1 (v0.1.0-transfer): architecture, design system, adaptive phone/TV navigation, Home, local file manager, and the secure wireless transfer system.
+
+## Build
+
+Requirements: JDK 17+ (21 tested), Android SDK platform 35 + build-tools 35.
+
+```
+echo "sdk.dir=/path/to/android-sdk" > local.properties
+./gradlew :app:assembleRelease          # → app/build/outputs/apk/release/app-release.apk
+./gradlew :app:testDebugUnitTest        # transfer protocol tests (loopback, real sockets)
+```
+
+The release key `nova-release.jks` is **not in git** (it's a secret). Copy it into the project root to sign builds that update the installed app; passwords can be overridden with `NOVA_KEYSTORE_PASSWORD` / `NOVA_KEY_PASSWORD`. Without it, builds are signed with the debug key and can't update an install signed with the release key.
+
+## Install
+
+- **S24 Ultra:** open the APK and allow "Install unknown apps" for your file manager or browser.
+- **Shield / MINIX:** `adb connect <tv-ip>` then `adb install -r app-release.apk`, or copy it to USB and open it with a TV file manager.
+- **All files access on Android TV:** some TV firmwares have no settings screen for this permission. Grant it once with:
+  `adb shell appops set --uid com.nova.files MANAGE_EXTERNAL_STORAGE allow`
+  Receiving works without it (files go to `Download/NovaFiles`).
+
+## Transfer architecture
+
+| Layer | Implementation |
+|---|---|
+| Discovery | UDP broadcast beacons on port 47820 plus DNS-SD `_novafiles._tcp`, with manual IP and QR/link fallbacks |
+| Transport | TCP port 47821 (falls back to a free port), length-prefixed frames, 256 KiB streamed chunks. Files are never held fully in memory. |
+| Identity | EC P-256 signing key held in Android Keystore. Device ID = SHA-256 fingerprint. |
+| Session | Ephemeral ECDH, HKDF-SHA256 per-direction keys, and AES-256-GCM with counter nonces (protects against replay, reordering and tampering) |
+| Pairing | Both screens show a 6-digit code derived from the session transcript (detects MITM). Trusted devices are pinned by fingerprint after that. |
+| Integrity | SHA-256 for every file, temp `.part` files in a hidden folder, atomic rename after verification, never overwrites (`name (1).ext`) |
+| Safety | Path sanitising rejects `..`, absolute paths and reserved names. Canonical-path check. Free-space check before accepting. |
+| Resume | Partial data is kept per (sender, path, size, mtime). Sender auto-retries 3× and the receiver auto-resumes the same transfer ID. |
+| Liveness | Heartbeat every 8 s; a dead link is detected within 45 s, including while paused |
+| Background | Foreground service (`dataSync`) holds Wi-Fi high-perf and partial wake locks only while transferring |
+
+Code layout: `transfer/protocol` (pure Kotlin, JVM-tested), `transfer` (Android discovery/service/stores), `core` (storage, settings, device profile), `ui` (Compose, theme, screens).
+
+## Device test checklist (milestone 1)
+
+Run on the same Wi-Fi, with Nova Files open on the receiver.
+
+1. **Discovery:** each device appears in Transfer › Nearby devices on the other two (6 directions).
+2. **Pairing:** the first send shows the same 6-digit code on both screens. Trust it. Later sends ask nothing except the Accept prompt (unless auto-accept is on).
+3. **Send matrix:** S24→Shield, S24→MINIX, Shield→S24, MINIX→S24, Shield↔MINIX. For each, send a photo, a folder containing subfolders, and a file over 4 GB.
+4. **Verify:** files land in `Download/NovaFiles` with folder structure intact. The card says "SHA-256 verified".
+5. **Interruption:** start a large send and turn the receiver's Wi-Fi off for 10 s, then on. The sender retries and resumes without starting over (or press Retry in History).
+6. **Controls:** pause, resume and cancel from both sender and receiver.
+7. **Manual IP:** Transfer › Connect by IP using the address shown under Show QR / IP.
+8. **APK handoff:** send an APK to the Shield or MINIX, open it from Files, and confirm the system installer appears (nothing installs automatically).
+9. **TV navigation:** use the remote only. Every button should be reachable and show a clear focus ring.
+
+If discovery fails but Connect by IP works, the router is blocking broadcast/mDNS (AP/client isolation).

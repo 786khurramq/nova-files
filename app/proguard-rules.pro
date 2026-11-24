@@ -1,0 +1,6 @@
+-keepattributes *Annotation*, InnerClasses, Signature
+-keep,includedescriptorclasses class com.nova.files.**$$serializer { *; }
+-keepclassmembers class com.nova.files.** { *** Companion; }
+-keepclasseswithmembers class com.nova.files.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep @kotlinx.serialization.Serializable class com.nova.files.** { *; }
+-dontwarn com.google.zxing.**
