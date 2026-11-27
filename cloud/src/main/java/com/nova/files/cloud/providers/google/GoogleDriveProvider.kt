@@ -11,8 +11,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
 /**
- * Google Drive API v3 with the least-privilege `drive.file` scope: Nova Files can see and manage the
- * files and folders it created or uploaded – not the rest of the user's Drive. Identity is the
+ * Google Drive API v3 with the full `drive` scope (approved by the owner in 0.3.3 so the whole Drive is
+ * browsable; accounts connected earlier with `drive.file` are asked to reconnect). Identity is the
  * immutable Drive fileId. Google Docs/Sheets/Slides have no binary content and are exported.
  */
 class GoogleDriveProvider(
@@ -28,7 +28,9 @@ class GoogleDriveProvider(
     )
 
     companion object {
-        const val SCOPE = "https://www.googleapis.com/auth/drive.file"
+        const val SCOPE = "https://www.googleapis.com/auth/drive"
+        /** True when the granted scope string includes full Drive access (not only drive.file). */
+        fun hasFullAccess(granted: String?): Boolean = granted?.split(' ')?.any { it == SCOPE } == true
         const val FOLDER = "application/vnd.google-apps.folder"
         fun oauthConfig(clientId: String, packageName: String) = OAuthConfig(
             providerId = ProviderId.GOOGLE_DRIVE,

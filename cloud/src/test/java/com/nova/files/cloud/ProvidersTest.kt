@@ -34,6 +34,14 @@ class ProvidersTest {
 
     // ================================================================ hashing
 
+    @Test fun googleFullDriveScopeDetection() {
+        val g = com.nova.files.cloud.providers.google.GoogleDriveProvider
+        org.junit.Assert.assertEquals("https://www.googleapis.com/auth/drive", g.SCOPE)
+        org.junit.Assert.assertTrue(g.hasFullAccess("openid https://www.googleapis.com/auth/drive"))
+        org.junit.Assert.assertFalse(g.hasFullAccess("https://www.googleapis.com/auth/drive.file"))
+        org.junit.Assert.assertFalse(g.hasFullAccess(null))
+    }
+
     @Test fun dropboxContentHash() {
         assertEquals("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", DropboxContentHasher().digestHex())
         val data = kotlin.random.Random(3).nextBytes(9 * 1024 * 1024 + 17)       // 3 blocks

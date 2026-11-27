@@ -156,8 +156,22 @@ fun CloudBrowserScreen(c: AppContainer, state: AppState, account: AccountEntity)
                 Muted(listOfNotNull(pid.label, account.email).joinToString(" · "), maxLines = 1)
             }
         }
-        if (pid == ProviderId.GOOGLE_DRIVE) Muted("Nova Files can only see files and folders it has uploaded or created in this Drive. Your other Drive files stay private.",
-            Modifier.padding(horizontal = 20.dp, vertical = 2.dp), 3)
+        if (pid == ProviderId.GOOGLE_DRIVE) {
+            // Accounts connected before 0.3.3 (or where the Drive box was unticked) only have drive.file access.
+            var limited by remember(account.id) { mutableStateOf(false) }
+            LaunchedEffect(account.id, refresh) {
+                limited = !com.nova.files.cloud.providers.google.GoogleDriveProvider.hasFullAccess(c.cloud.accounts.grantedScope(account.id))
+            }
+            // After a reconnect for this account, reload the listing with the new access.
+            LaunchedEffect(account.id) { c.cloud.auth.connected.collect { if (it == account.id) { cursor = null; refresh++ } } }
+            if (limited) Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                Muted("Only files Nova Files created are shown. Reconnect and allow Drive access to see all your files.", maxLines = 3)
+                Spacer(Modifier.height(6.dp))
+                NovaButton("Reconnect to show all files", Icons.Rounded.Login, primary = true) {
+                    scope.launch { c.cloud.auth.begin(ctx, pid, account.id)?.let { c.transfers.toast(it) } }
+                }
+            }
+        }
 
         // Breadcrumbs
         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -216,7 +230,7 @@ fun CloudBrowserScreen(c: AppContainer, state: AppState, account: AccountEntity)
                     else NovaButton("Try again", Icons.Rounded.Refresh) { refresh++ }
                 }
                 !loading && items.isEmpty() -> EmptyState(Icons.Rounded.FolderOpen, if (search != null) "No matches" else "Empty folder",
-                    if (pid == ProviderId.GOOGLE_DRIVE && search == null && stack.size == 1) "Upload something from this device to get started." else "")
+                    if (search == null && stack.size == 1) "Upload something from this device to get started." else "")
                 else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (e != null) item { Muted("Showing saved listing – ${e.userMessage}", Modifier.padding(4.dp), 2) }
                     items(sorted, key = { it.id }) { f ->

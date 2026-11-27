@@ -68,6 +68,12 @@ class AccountRepository(
         return entity
     }
 
+    /** The OAuth scope string granted to this account, or null if unknown / not OAuth. */
+    suspend fun grantedScope(accountId: String): String? {
+        val acct = db.accounts().byId(accountId) ?: return null
+        return ((credentials.get(acct.credentialRef) as? CredentialResult.Ok)?.credentials as? Credentials.OAuth)?.scope
+    }
+
     suspend fun markNeedsReconnect(accountId: String) = db.accounts().setAuth(accountId, AuthStatus.NEEDS_RECONNECT)
 
     /** Updates display name/email/avatar after a refresh, keeping identity unchanged. */
