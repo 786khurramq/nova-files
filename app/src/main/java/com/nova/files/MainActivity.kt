@@ -29,7 +29,8 @@ class MainActivity : ComponentActivity() {
             else if (Build.VERSION.SDK_INT <= 32) add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
         if (perms.isNotEmpty()) askPermissions.launch(perms.toTypedArray())
-        handleIntent(intent)
+        // Only handle the launch intent once; after process recreation it would be re-delivered.
+        if (savedInstanceState == null) handleIntent(intent)
         if (c.settings.settings.value.discoverable) com.nova.files.transfer.TransferService.ensureRunning(this)
         setContent { AppRoot(c, state, this) }
     }
@@ -43,13 +44,21 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         val c = (application as NovaApp).container
         when (intent.action) {
-            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { share(listOf(it)) }
-            Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { share(it) }
+            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
+                val all = com.nova.files.core.ExternalContent.urisFrom(intent)
+                val safe = all.filter { com.nova.files.core.ExternalContent.isSafe(this, it) }
+                when {
+                    safe.isNotEmpty() -> share(safe)
+                    all.isNotEmpty() -> c.transfers.toast("Those items can't be shared from that location")
+                    else -> c.transfers.toast("Only files can be sent with Nova Files – nothing to send")
+                }
+            }
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "nova" }?.let { uri ->
                 c.transfers.parseTarget(uri.toString())?.let { c.transfers.pair(it); state.tab = Tab.TRANSFER }
             }
         }
         if (intent.getStringExtra("open") == "transfer") state.tab = Tab.TRANSFER
+        intent.getStringExtra("open_dir")?.let { state.openFolder(java.io.File(it)) }
     }
 
     private fun share(uris: List<Uri>) {

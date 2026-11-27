@@ -13,8 +13,8 @@ android {
         applicationId = "com.nova.files"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-transfer"
+        versionCode = 2
+        versionName = "0.1.1-openwith"
     }
 
     // Release key is NOT in git. Put nova-release.jks in the project root (or set NOVA_KEYSTORE),

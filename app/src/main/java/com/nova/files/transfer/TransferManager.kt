@@ -344,10 +344,26 @@ class TransferManager(
         return "nova://pair?h=$ip&p=${st.port}&id=${identity.deviceId}&fp=${identity.fingerprint}&t=${profile.typeTag}&n=${Uri.encode(deviceName)}"
     }
 
+    /** Saves shared items into the receive folder on this device (no network involved). */
+    suspend fun saveLocally(items: List<SendItem>): Int = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val root = receiveRoot()
+        var n = 0
+        for (it in items.filter { i -> !i.isDir }) {
+            val name = com.nova.files.core.ExternalContent.safeName(it.relPath.substringAfterLast('/'))
+            val target = FileReceiveSink.uniqueName(File(root, name))
+            val tmp = File(root, ".${target.name}.novatmp")
+            try {
+                it.open().use { i -> tmp.outputStream().use { o -> i.copyTo(o, 1 shl 20) } }
+                if (tmp.renameTo(target)) n++
+            } finally { if (tmp.exists()) tmp.delete() }
+        }
+        n
+    }
+
     // ------------------------------------------------------------- send items from content URIs
-    fun itemsFromUris(uris: List<Uri>): List<SendItem> = uris.mapNotNull { uri ->
+    fun itemsFromUris(uris: List<Uri>): List<SendItem> = uris.filter { com.nova.files.core.ExternalContent.isSafe(ctx, it) }.mapNotNull { uri ->
         runCatching {
-            if (uri.scheme == "file") { val f = File(uri.path!!); return@runCatching FileSendItem(f, f.name) }
+            if (uri.scheme == "file") { val f = File(uri.path!!); if (!f.isFile) return@runCatching null; return@runCatching FileSendItem(f, f.name) }
             var name = "file"; var size = -1L
             ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
@@ -355,7 +371,7 @@ class TransferManager(
                     if (!c.isNull(1)) size = c.getLong(1)
                 }
             }
-            name = name.replace('/', '_')
+            name = com.nova.files.core.ExternalContent.safeName(name)
             if (size < 0) {
                 // Unknown length: stage a copy so size and checksum are exact.
                 val f = File(ctx.cacheDir, "share-${System.nanoTime()}-$name")

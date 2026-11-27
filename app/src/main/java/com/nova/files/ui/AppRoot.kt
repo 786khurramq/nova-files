@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nova.files.AppContainer
 import com.nova.files.core.fmtSize
@@ -258,6 +259,19 @@ fun DevicePickerDialog(c: AppContainer, state: AppState, pending: PendingSend) {
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                val scope = rememberCoroutineScope()
+                if (pending.sources.isEmpty()) {
+                    NovaButton("Save to this device instead", Icons.Rounded.Download, Modifier.fillMaxWidth()) {
+                        val items = pending.items
+                        state.pendingSend = null
+                        scope.launch {
+                            val n = runCatching { c.transfers.saveLocally(items) }
+                            c.transfers.toast(n.fold({ "Saved $it file${if (it == 1) "" else "s"} to ${c.transfers.receiveRoot().name}" }, { "Save failed: ${it.message}" }))
+                            if (n.isSuccess) state.openFolder(c.transfers.receiveRoot())
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 NovaButton("Cancel", null, Modifier.fillMaxWidth()) { state.pendingSend = null }
             }
         }
