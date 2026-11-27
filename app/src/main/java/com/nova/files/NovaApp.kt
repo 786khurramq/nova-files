@@ -23,7 +23,8 @@ class AppContainer(app: Application) {
     val trust = TrustStore(app)
     val history = HistoryStore(app)
     val thumbs = com.nova.files.thumbs.ThumbnailLoader(app)
-    val transfers = TransferManager(app, scope, settings, profile, identity, trust, history)
+    val cloud = com.nova.files.cloudui.CloudRuntime(app, scope)
+    val transfers = TransferManager(app, scope, settings, profile, identity, trust, history, cloud.queue)
 }
 
 class NovaApp : Application() {

@@ -100,6 +100,15 @@ fun FilesScreen(c: AppContainer, state: AppState, activity: Activity) {
         }
         // Volumes
         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            item(key = "cloud") {
+                NovaCard(onClick = { state.tab = com.nova.files.ui.Tab.CLOUD }, padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp), shape = RoundedCornerShape(16.dp), accent = Spectrum.Cloud) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Cloud, null, tint = Spectrum.Cloud)
+                        Spacer(Modifier.width(8.dp))
+                        Column { Text("Cloud", style = MaterialTheme.typography.labelLarge, maxLines = 1); Muted("Accounts & transfers") }
+                    }
+                }
+            }
             items(volumes, key = { it.path.absolutePath }) { v ->
                 val sel = root?.path == v.path
                 NovaCard(onClick = { dir = v.path; selection = emptySet() }, selected = sel, padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp), shape = RoundedCornerShape(16.dp)) {

@@ -46,10 +46,10 @@ class TransferService : Service() {
         startFg(buildNotification("Ready to receive", null, 0, 0))
         val app = application as NovaApp
         scope.launch {
-            combine(app.container.transfers.transfers, app.container.settings.settings) { t, s -> t to s }.collect { (list, s) ->
+            combine(app.container.transfers.transfers, app.container.settings.settings, app.container.cloud.engine.running) { t, s, e -> Triple(t, s, e) }.collect { (list, s, engineBusy) ->
                 val active = list.filter { it.active }
-                setLocks(active.isNotEmpty())
-                if (active.isEmpty() && !s.discoverable) { stopSelf(); return@collect }
+                setLocks(active.isNotEmpty() || engineBusy)
+                if (active.isEmpty() && !engineBusy && !s.discoverable) { stopSelf(); return@collect }
                 val n = if (active.isEmpty()) buildNotification("Visible as ${app.container.transfers.deviceName}", "Ready to receive files", 0, 0)
                 else {
                     val a = active.first()
@@ -70,6 +70,10 @@ class TransferService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Every startForegroundService() call must be followed by startForeground().
         startFg(lastNotification ?: buildNotification("Ready to receive", null, 0, 0))
+        if (intent?.action == ACTION_DRAIN) {
+            val engine = (application as NovaApp).container.cloud.engine
+            scope.launch(Dispatchers.IO) { engine.drain() }
+        }
         return START_STICKY
     }
 
@@ -128,6 +132,12 @@ class TransferService : Service() {
 
         fun ensureRunning(ctx: Context) {
             runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, TransferService::class.java)) }
+        }
+
+        const val ACTION_DRAIN = "com.nova.files.DRAIN_QUEUE"
+        /** Runs queued local/cloud jobs inside this dataSync foreground service (Android < 14 or non-network jobs). */
+        fun drain(ctx: Context) {
+            runCatching { ContextCompat.startForegroundService(ctx, Intent(ctx, TransferService::class.java).setAction(ACTION_DRAIN)) }
         }
 
         fun stop(ctx: Context) { ctx.stopService(Intent(ctx, TransferService::class.java)) }

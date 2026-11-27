@@ -13,8 +13,8 @@ android {
         applicationId = "com.nova.files"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2-thumbnails"
+        versionCode = 4
+        versionName = "0.2.0-cloud-foundation"
     }
 
     // Release key is NOT in git. Put nova-release.jks in the project root (or set NOVA_KEYSTORE),
@@ -75,6 +75,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
+    implementation(project(":cloud"))
+    implementation("androidx.work:work-runtime-ktx:2.10.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

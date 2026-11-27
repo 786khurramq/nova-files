@@ -90,8 +90,7 @@ private fun Content(c: AppContainer, state: AppState, activity: Activity) {
             listOf("Junk & cache scan of accessible storage", "Large files, old downloads, empty folders", "Exact duplicates (SHA-256) and similar photos", "Preview + confirmation before any deletion, trash/undo"))
         Tab.APKS -> ModulePendingScreen(Tab.APKS, Spectrum.Apps, "APK backup & installer",
             listOf("Extract installed apps incl. split APK sets", "Backup to internal, USB, SD or cloud", "Install via Android PackageInstaller with your approval", "Send backups straight to MINIX or Shield"))
-        Tab.CLOUD -> ModulePendingScreen(Tab.CLOUD, Spectrum.Cloud, "Multi-cloud storage",
-            listOf("Google Drive, Dropbox, OneDrive, MEGA, WebDAV", "OAuth 2.0 with Keystore-encrypted tokens", "Browse, upload, download, cloud ↔ device transfers"))
+        Tab.CLOUD -> com.nova.files.cloudui.CloudScreen(c, state)
     }
 }
 
@@ -261,13 +260,16 @@ fun DevicePickerDialog(c: AppContainer, state: AppState, pending: PendingSend) {
                 Spacer(Modifier.height(10.dp))
                 val scope = rememberCoroutineScope()
                 if (pending.sources.isEmpty()) {
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
                     NovaButton("Save to this device instead", Icons.Rounded.Download, Modifier.fillMaxWidth()) {
                         val items = pending.items
                         state.pendingSend = null
                         scope.launch {
-                            val n = runCatching { c.transfers.saveLocally(items) }
-                            c.transfers.toast(n.fold({ "Saved $it file${if (it == 1) "" else "s"} to ${c.transfers.receiveRoot().name}" }, { "Save failed: ${it.message}" }))
-                            if (n.isSuccess) state.openFolder(c.transfers.receiveRoot())
+                            val dest = c.transfers.receiveRoot()
+                            val ids = c.cloud.saveToDevice(items, dest)
+                            c.cloud.startQueued(ctx)
+                            c.transfers.toast("Saving ${ids.size} file${if (ids.size == 1) "" else "s"} to ${dest.name} – progress in Cloud › Transfers")
+                            state.tab = Tab.CLOUD
                         }
                     }
                     Spacer(Modifier.height(8.dp))

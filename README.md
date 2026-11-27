@@ -54,3 +54,20 @@ Run on the same Wi-Fi, with Nova Files open on the receiver.
 9. **TV navigation:** use the remote only. Every button should be reachable and show a clear focus ring.
 
 If discovery fails but Connect by IP works, the router is blocking broadcast/mDNS (AP/client isolation).
+
+## Cloud foundation (Phase 1, v0.2.0)
+
+Module `:cloud` (Android library, no UI):
+
+| Package | Purpose |
+|---|---|
+| `cloud.core` | `CloudProviderAdapter`, `CloudFile`, `Operation` capabilities + item-specific `canExecute`, typed `CloudException`, NFC/FAT-safe `FileNames` |
+| `cloud.db` | Room `nova_cloud.db` v1: `cloud_accounts` (unique providerId+providerAccountId), `cloud_items` (PK accountId+fileId), `cloud_cursors`, `transfers`. Schema exported to `cloud/schemas`; destructive migration is disabled. |
+| `cloud.auth` | Keystore AES-256-GCM `CredentialStore` (record key bound as AAD), PKCE + state (`PendingAuthStore`, single use, 15 min expiry, survives process death), `OAuthClient`, per-account single-flight `AccountTokenProvider` |
+| `cloud.net` | Shared OkHttp base client, per-account derived clients (no global auth interceptor), HTTPS↔HTTP redirects disabled, `HttpErrors`, `RetryPolicy` (backoff + jitter + Retry-After, idempotency-aware), `ProviderLimiter`, `Redact` |
+| `cloud.accounts` | `AccountRepository`: connect/reconnect/remove, per-account `AccountSession` |
+| `cloud.transfer` | `Endpoint` (Local, ContentUri, SafTree, Cloud, Wireless), `TransferSource`/`TransferDestination`, persistent `TransferQueue`, `TransferEngine` (bounded buffer, checkpoints, conflict policy, size + SHA-256 checks) |
+
+App: `cloudui/CloudRuntime` (wiring, Android 14+ user-initiated jobs for network transfers, dataSync service otherwise, WorkManager recovery notification), `cloudui/CloudScreen` (account centre + shared transfer queue). Wireless transfers are recorded in the same queue.
+
+Tests: `./gradlew :app:testDebugUnitTest :cloud:testDebugUnitTest`. Offline Robolectric: set `ROBOLECTRIC_DEPS` to a folder containing `android-all-instrumented-14-robolectric-10818077-i7.jar`.

@@ -14,6 +14,8 @@ import com.nova.files.ui.AppRoot
 import com.nova.files.ui.AppState
 import com.nova.files.ui.PendingSend
 import com.nova.files.ui.Tab
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
     private val state = AppState()
@@ -33,6 +35,14 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleIntent(intent)
         if (c.settings.settings.value.discoverable) com.nova.files.transfer.TransferService.ensureRunning(this)
         setContent { AppRoot(c, state, this) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The app is visible, so it may start the foreground service / user-initiated job for queued work
+        // left over from an interruption, process death or reboot.
+        val c = (application as NovaApp).container
+        lifecycleScope.launch { c.cloud.startQueued(this@MainActivity) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -58,6 +68,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (intent.getStringExtra("open") == "transfer") state.tab = Tab.TRANSFER
+        if (intent.getStringExtra("open") == "cloud") state.tab = Tab.CLOUD
         intent.getStringExtra("open_dir")?.let { state.openFolder(java.io.File(it)) }
     }
 

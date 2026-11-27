@@ -1,0 +1,4 @@
+-keep,includedescriptorclasses class com.nova.files.cloud.**$$serializer { *; }
+-keepclassmembers class com.nova.files.cloud.** { *** Companion; }
+-keepclasseswithmembers class com.nova.files.cloud.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep @kotlinx.serialization.Serializable class com.nova.files.cloud.** { *; }

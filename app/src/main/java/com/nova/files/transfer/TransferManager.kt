@@ -11,6 +11,7 @@ import com.nova.files.BuildConfig
 import com.nova.files.core.DeviceProfile
 import com.nova.files.core.SettingsRepository
 import com.nova.files.transfer.protocol.*
+import com.nova.files.cloudui.recordWireless
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +75,7 @@ class TransferManager(
     val identity: AndroidIdentityKey,
     val trust: TrustStore,
     val history: HistoryStore,
+    private val queue: com.nova.files.cloud.transfer.TransferQueue? = null,
 ) {
     private val tag = "NovaTransfer"
     val discovery = Discovery(ctx, scope, identity.deviceId)
@@ -181,6 +183,7 @@ class TransferManager(
                 val t = ActiveTransfer(offer.transferId, false, peer.name, peer.deviceType, TransferStatus.TRANSFERRING,
                     offer.items.count { !it.dir }, offer.totalBytes, control = control, receiveRoot = receiveRoot().path)
                 active = t; upsert(t); TransferService.ensureRunning(ctx)
+                recordQueue { q -> q.recordWireless("rx-" + offer.transferId, false, peer.deviceId, peer.name, com.nova.files.cloud.transfer.Endpoint.Local(receiveRoot().path), "${offer.items.count { !it.dir }} files", offer.totalBytes) }
             }
 
             override fun onProgress(peer: PeerInfo, p: TransferProgress) {
@@ -191,12 +194,27 @@ class TransferManager(
                 val a = active ?: return
                 val status = when { result.success -> TransferStatus.DONE; result.cancelled -> TransferStatus.CANCELLED; else -> TransferStatus.FAILED }
                 upsert(a.copy(status = status, result = result, message = result.error, control = null))
+                recordQueue { it.progress("rx-" + offer.transferId, result.bytes, null, force = true); it.setState("rx-" + offer.transferId, queueState(status), result.error) }
                 history.add(HistoryEntry(offer.transferId, false, peer.name, peer.deviceId, peer.deviceType, System.currentTimeMillis(),
                     offer.items.count { !it.dir }, result.bytes, result.success, result.cancelled, result.error,
                     result.files.map { HistoryFile(it.path, it.size, it.ok, it.savedAs, it.error) }, baseDir = receiveRoot().path))
                 TransferService.notifyFinished(ctx, false, peer.name, result)
             }
         })
+    }
+
+    /** Mirrors wireless transfers into the shared persistent queue; failures there never affect the transfer. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val queueWriter = Dispatchers.IO.limitedParallelism(1)   // FIFO: insert → progress → final state
+    private fun recordQueue(block: suspend (com.nova.files.cloud.transfer.TransferQueue) -> Unit) {
+        val q = queue ?: return
+        scope.launch(queueWriter) { runCatching { block(q) } }
+    }
+
+    private fun queueState(s: TransferStatus) = when (s) {
+        TransferStatus.DONE -> com.nova.files.cloud.db.TransferState.COMPLETED
+        TransferStatus.CANCELLED -> com.nova.files.cloud.db.TransferState.CANCELLED
+        else -> com.nova.files.cloud.db.TransferState.FAILED
     }
 
     private suspend fun ask(build: (CompletableDeferred<Boolean>) -> Prompt): Boolean {
@@ -232,6 +250,12 @@ class TransferManager(
         val control = TransferControl()
         var t = ActiveTransfer(transferId, true, target.name, target.type, TransferStatus.CONNECTING, fileCount, total, control = control)
         upsert(t)
+        recordQueue { q ->
+            val first = sources.firstOrNull()?.let { com.nova.files.cloud.transfer.Endpoint.Local(it) }
+                ?: (items.firstOrNull() as? UriSendItem)?.let { com.nova.files.cloud.transfer.Endpoint.ContentUri(it.uri.toString(), it.relPath) }
+                ?: com.nova.files.cloud.transfer.Endpoint.Local("")
+            q.recordWireless(transferId, true, target.deviceId ?: target.host, target.name, first, if (fileCount == 1) items.first { !it.isDir }.relPath.substringAfterLast('/') else "$fileCount files", total)
+        }
         TransferService.ensureRunning(ctx)
         scope.launch(Dispatchers.IO) {
             var attempt = 0
@@ -256,6 +280,7 @@ class TransferManager(
                         override fun onProgress(p: TransferProgress) {
                             acceptedOnce = true
                             t = t.copy(status = TransferStatus.TRANSFERRING, progress = p); upsert(t)
+                            recordQueue { it.progress(transferId, p.bytesDone, null) }
                         }
                     })
                     result = r
@@ -280,6 +305,7 @@ class TransferManager(
             val r = result ?: TransferResult(transferId, false, emptyList(), t.progress?.bytesDone ?: 0, lastError ?: if (control.cancelled) "Cancelled" else "Failed", control.cancelled)
             val status = when { r.success -> TransferStatus.DONE; r.cancelled -> TransferStatus.CANCELLED; else -> TransferStatus.FAILED }
             t = t.copy(status = status, result = r, message = r.error, control = null); upsert(t)
+            recordQueue { it.progress(transferId, r.bytes, null, force = true); it.setState(transferId, queueState(status), r.error) }
             history.add(HistoryEntry(transferId, true, t.peerName, target.deviceId ?: "", t.peerType, System.currentTimeMillis(), fileCount,
                 r.bytes, r.success, r.cancelled, r.error, r.files.map { HistoryFile(it.path, it.size, it.ok, it.savedAs, it.error) }, sources))
             TransferService.notifyFinished(ctx, true, t.peerName, r)
@@ -342,22 +368,6 @@ class TransferManager(
         val st = _server.value
         val ip = st.addresses.firstOrNull() ?: return null
         return "nova://pair?h=$ip&p=${st.port}&id=${identity.deviceId}&fp=${identity.fingerprint}&t=${profile.typeTag}&n=${Uri.encode(deviceName)}"
-    }
-
-    /** Saves shared items into the receive folder on this device (no network involved). */
-    suspend fun saveLocally(items: List<SendItem>): Int = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val root = receiveRoot()
-        var n = 0
-        for (it in items.filter { i -> !i.isDir }) {
-            val name = com.nova.files.core.ExternalContent.safeName(it.relPath.substringAfterLast('/'))
-            val target = FileReceiveSink.uniqueName(File(root, name))
-            val tmp = File(root, ".${target.name}.novatmp")
-            try {
-                it.open().use { i -> tmp.outputStream().use { o -> i.copyTo(o, 1 shl 20) } }
-                if (tmp.renameTo(target)) n++
-            } finally { if (tmp.exists()) tmp.delete() }
-        }
-        n
     }
 
     // ------------------------------------------------------------- send items from content URIs
