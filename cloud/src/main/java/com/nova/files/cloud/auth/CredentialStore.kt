@@ -11,7 +11,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -70,7 +69,6 @@ class AndroidKeystoreKeyProvider(private val alias: String = "nova_cloud_credent
  */
 class CredentialStore(private val store: DataStore<Preferences>, private val keys: KeyProvider) {
     private val json = Json { ignoreUnknownKeys = true; classDiscriminator = "t" }
-    private val random = SecureRandom()
 
     private fun prefKey(ref: String) = stringPreferencesKey("cred:$ref")
     private fun aad(ref: String) = "nova-cred-v1|$ref".toByteArray()
@@ -109,10 +107,14 @@ class CredentialStore(private val store: DataStore<Preferences>, private val key
     internal suspend fun putEncrypted(ref: String, enc: String) { store.edit { it[prefKey(ref)] = enc } }
 
     private fun encrypt(plain: ByteArray, aad: ByteArray): String {
-        val iv = ByteArray(12).also { random.nextBytes(it) }
+        // Android Keystore requires the cipher to generate the IV (caller-supplied IVs are rejected
+        // for keys with randomized encryption), so the IV is read back from the cipher.
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, keys.key(), GCMParameterSpec(128, iv)); c.updateAAD(aad)
-        return "v1:" + Base64.getEncoder().encodeToString(iv + c.doFinal(plain))
+        c.init(Cipher.ENCRYPT_MODE, keys.key()); c.updateAAD(aad)
+        val out = c.doFinal(plain)
+        val iv = c.iv ?: throw IllegalStateException("No IV")
+        require(iv.size == 12) { "Unexpected IV length" }
+        return "v1:" + Base64.getEncoder().encodeToString(iv + out)
     }
 
     private fun decrypt(s: String, aad: ByteArray): ByteArray {

@@ -47,7 +47,14 @@ class CloudAuth(
     }
 
     /** Opens the provider's sign-in page in the browser. Returns an error message if that's impossible here. */
-    suspend fun begin(ctx: Context, provider: ProviderId, reconnectAccountId: String? = null): String? {
+    suspend fun begin(ctx: Context, provider: ProviderId, reconnectAccountId: String? = null): String? = try {
+        beginInternal(ctx, provider, reconnectAccountId)
+    } catch (e: Exception) {
+        android.util.Log.e("NovaAuth", "Sign-in could not start: ${e.javaClass.simpleName}")
+        "Couldn't start sign-in (${e.javaClass.simpleName}). Please try again."
+    }
+
+    private suspend fun beginInternal(ctx: Context, provider: ProviderId, reconnectAccountId: String?): String? {
         val cfg = configs[provider] ?: return "${provider.label} isn't configured in this build"
         val p = pending.begin(provider, cfg.redirectUri, reconnectAccountId)
         val i = Intent(Intent.ACTION_VIEW, Uri.parse(oauth.authorizationUrl(cfg, p))).addCategory(Intent.CATEGORY_BROWSABLE)

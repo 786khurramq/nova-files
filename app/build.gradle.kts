@@ -13,8 +13,8 @@ android {
         applicationId = "com.nova.files"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0-drive-dropbox"
+        versionCode = 6
+        versionName = "0.3.1-drive-dropbox"
         val googleClientId = (project.findProperty("nova.googleClientId") as String?).orEmpty()
         val dropboxAppKey = (project.findProperty("nova.dropboxAppKey") as String?).orEmpty()
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
