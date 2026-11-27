@@ -53,6 +53,8 @@ fun AppRoot(c: AppContainer, state: AppState, activity: Activity) {
         val msg by c.transfers.messages.collectAsStateWithLifecycle()
         LaunchedEffect(msg) { msg?.let { snackbar.showSnackbar(it); c.transfers.consumeMessage() } }
         LaunchedEffect(Unit) { c.cloud.notices.collect { c.transfers.toast(it) } }
+        // After a successful sign-in, open that account's files.
+        LaunchedEffect(Unit) { c.cloud.auth.connected.collect { id -> state.showSettings = false; state.tab = Tab.CLOUD; state.cloudAccount = id } }
 
         BackHandler(enabled = state.showSettings) { state.showSettings = false }
         BackHandler(enabled = !state.showSettings && state.tab != Tab.HOME && state.tab != Tab.FILES) { state.tab = Tab.HOME }

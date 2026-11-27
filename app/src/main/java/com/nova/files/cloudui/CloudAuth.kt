@@ -40,6 +40,9 @@ class CloudAuth(
     private val onMessage: (String) -> Unit,
 ) {
     val oauth = OAuthClient(http.base)
+    private val _connected = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Account ids that just finished signing in, so the UI can open them. */
+    val connected: kotlinx.coroutines.flow.SharedFlow<String> = _connected
 
     val configs: Map<ProviderId, OAuthConfig> = buildMap {
         if (BuildConfig.GOOGLE_CLIENT_ID.isNotBlank()) put(ProviderId.GOOGLE_DRIVE, GoogleDriveProvider.oauthConfig(BuildConfig.GOOGLE_CLIENT_ID, app.packageName))
@@ -84,6 +87,7 @@ class CloudAuth(
             val acct = accounts().connect(p.providerId, profile, creds, expectAccountId = p.reconnectAccountId)
             runCatching { adapter.quota(tmpSession)?.let { accounts().updateQuota(acct.id, it.usedBytes, it.totalBytes) } }
             onMessage(if (p.reconnectAccountId != null) "${acct.displayName} reconnected" else "Connected ${p.providerId.label}: ${acct.displayName}")
+            _connected.tryEmit(acct.id)
         } catch (e: CloudException) {
             onMessage(e.userMessage)
         } catch (e: Exception) {

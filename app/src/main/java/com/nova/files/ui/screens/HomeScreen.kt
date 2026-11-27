@@ -27,6 +27,7 @@ import com.nova.files.ui.theme.Nova
 import com.nova.files.ui.theme.Spectrum
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
@@ -35,12 +36,27 @@ fun HomeScreen(c: AppContainer, state: AppState) {
     val nearby by c.transfers.discovery.devices.collectAsStateWithLifecycle()
     val transfers by c.transfers.transfers.collectAsStateWithLifecycle()
     val history by c.history.entries.collectAsStateWithLifecycle()
+    val cloudAccounts by c.cloud.accounts.observe().collectAsStateWithLifecycle(emptyList())
+    var cloudPick by remember { mutableStateOf<com.nova.files.cloud.core.ProviderId?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    fun openCloud(p: com.nova.files.cloud.core.ProviderId) {
+        val list = cloudAccounts.filter { it.providerId == p.name }
+        if (list.size == 1) { state.cloudAccount = list[0].id; state.tab = Tab.CLOUD } else cloudPick = p
+    }
     LaunchedEffect(Unit) { volumes = withContext(Dispatchers.IO) { c.files.volumes() } }
     val cols = if (c.profile.isTv) 4 else 2
     val full = { _: Any -> GridItemSpan(cols) }
 
     val recent = remember(history) {
         history.filter { !it.outgoing && it.baseDir.isNotBlank() }.flatMap { h -> h.files.filter { it.ok }.map { File(h.baseDir, it.savedAs) } }.filter { it.exists() }.take(8)
+    }
+
+    cloudPick?.let { p ->
+        com.nova.files.cloudui.CloudAccountPicker(p, cloudAccounts.filter { it.providerId == p.name },
+            onOpen = { id -> cloudPick = null; state.cloudAccount = id; state.tab = Tab.CLOUD },
+            onSignIn = { cloudPick = null; scope.launch { c.cloud.auth.begin(ctx, p)?.let { c.transfers.toast(it) } } },
+            onDismiss = { cloudPick = null })
     }
 
     LazyVerticalGrid(GridCells.Fixed(cols), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -70,6 +86,10 @@ fun HomeScreen(c: AppContainer, state: AppState) {
             Environment.DIRECTORY_MUSIC to (Icons.Rounded.MusicNote to Spectrum.Audio), Environment.DIRECTORY_DOCUMENTS to (Icons.Rounded.Description to Spectrum.Documents)).forEach { (d, ic) ->
             val f = Environment.getExternalStoragePublicDirectory(d)
             if (f.exists()) quick(ic.first, d, "Folder", ic.second) { state.openFolder(f) }
+        }
+        listOf(com.nova.files.cloud.core.ProviderId.GOOGLE_DRIVE, com.nova.files.cloud.core.ProviderId.DROPBOX).forEach { p ->
+            val n = cloudAccounts.count { it.providerId == p.name }
+            quick(com.nova.files.cloudui.providerIcon(p), p.label, when (n) { 0 -> "Sign in"; 1 -> "1 account"; else -> "$n accounts" }, Spectrum.Cloud) { openCloud(p) }
         }
 
         val active = transfers.filter { it.active }
