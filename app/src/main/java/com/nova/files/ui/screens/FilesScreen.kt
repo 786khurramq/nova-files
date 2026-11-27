@@ -143,6 +143,7 @@ fun FilesScreen(c: AppContainer, state: AppState, activity: Activity) {
                     }
                     selection = emptySet(); selectMode = false
                 } }
+                item { NovaButton("Upload", Icons.Rounded.CloudUpload) { dialog = "upload" } }
                 item { NovaButton("Copy", Icons.Rounded.ContentCopy) { state.clipboard = Clipboard(selectedFiles.map { it.file }, false); selection = emptySet(); selectMode = false } }
                 item { NovaButton("Move", Icons.Rounded.ContentCut) { state.clipboard = Clipboard(selectedFiles.map { it.file }, true); selection = emptySet(); selectMode = false } }
                 if (selection.size == 1) item { NovaButton("Rename", Icons.Rounded.Edit) { dialog = "rename" } }
@@ -210,6 +211,7 @@ fun FilesScreen(c: AppContainer, state: AppState, activity: Activity) {
                 "\n\nFolders are deleted with everything inside. This cannot be undone.", "Delete", { dialog = null }) {
             scope.launch { c.files.delete(selectedFiles.map { it.file }).onSuccess { c.transfers.toast("Deleted $it item(s)") }.onFailure { c.transfers.toast(it.message ?: "Failed") }; selection = emptySet(); refresh++; dialog = null }
         }
+        "upload" -> com.nova.files.cloudui.UploadToCloudDialog(c, state, selectedFiles.map { it.file }) { dialog = null; selection = emptySet(); selectMode = false }
         "sort" -> SortDialog(settings.sortBy, settings.sortDesc, { dialog = null }) { s, d -> c.settings.setSort(s, d); dialog = null }
         "perm" -> ConfirmDialog("All files access", "This device has no settings screen for All files access (common on Android TV). Grant it once from a computer with ADB:\n\n${c.files.adbGrantCommand}\n\nWithout it Nova Files can still browse media folders and Downloads, and receive transfers into Download/NovaFiles.", "OK", { dialog = null }) { dialog = null }
     }

@@ -45,10 +45,21 @@ fun CloudScreen(c: AppContainer, state: AppState) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     var removing by remember { mutableStateOf<AccountEntity?>(null) }
+    var adding by remember { mutableStateOf(false) }
     val available = c.cloud.accounts.availableProviders
 
+    state.cloudAccount?.let { id ->
+        val acct = accounts.firstOrNull { it.id == id }
+        if (acct != null) { CloudBrowserScreen(c, state, acct); return }
+        if (accounts.isNotEmpty()) state.cloudAccount = null
+    }
+
+    fun signIn(p: ProviderId, reconnect: String? = null) = scope.launch {
+        c.cloud.auth.begin(ctx, p, reconnect)?.let { c.transfers.toast(it) }
+    }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { SectionTitle("Cloud accounts") }
+        item { SectionTitle("Cloud accounts", trailing = { if (available.isNotEmpty()) NovaButton("Add account", Icons.Rounded.Add, primary = true, color = Spectrum.Cloud) { adding = true } }) }
         if (accounts.isEmpty()) item {
             NovaCard(accent = Spectrum.Cloud) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -56,8 +67,8 @@ fun CloudScreen(c: AppContainer, state: AppState) {
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text("No cloud accounts connected", style = MaterialTheme.typography.titleMedium)
-                        Muted(if (available.isEmpty()) "Account sign-in arrives with the first providers in the next update. Nothing on this screen is simulated."
-                              else "Add an account to browse and transfer cloud files.", maxLines = 3)
+                        Muted(if (available.isEmpty()) "No cloud providers are configured in this build."
+                              else "Add an account to browse, upload and download cloud files. You can connect several accounts from the same provider.", maxLines = 3)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -68,12 +79,30 @@ fun CloudScreen(c: AppContainer, state: AppState) {
                         Icon(providerIcon(p), null, tint = Nova.colors.muted, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(10.dp))
                         Text(p.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        Pill(if (p in available) "Available" else plannedPhase(p), if (p in available) Spectrum.Success else Nova.colors.muted)
+                        if (p in available) NovaButton("Connect", null) { signIn(p) } else Pill(plannedPhase(p), Nova.colors.muted)
                     }
                 }
             }
         }
-        items(accounts, key = { it.id }) { a -> AccountCard(a) { removing = a } }
+        items(accounts, key = { it.id }) { a ->
+            AccountCard(a,
+                onOpen = { state.cloudAccount = a.id },
+                onReconnect = { signIn(ProviderId.valueOf(a.providerId), a.id) },
+                onRefresh = {
+                    scope.launch {
+                        runCatching {
+                            val p = c.cloud.accounts.provider(ProviderId.valueOf(a.providerId))!!
+                            val s = c.cloud.accounts.session(a.id)
+                            c.cloud.accounts.updateProfile(a.id, p.profile(s))
+                            p.quota(s)?.let { q -> c.cloud.accounts.updateQuota(a.id, q.usedBytes, q.totalBytes) }
+                        }.onFailure { e ->
+                            if (e is com.nova.files.cloud.core.CloudException.AuthRequired) c.cloud.accounts.markNeedsReconnect(a.id)
+                            c.transfers.toast((e as? com.nova.files.cloud.core.CloudException)?.userMessage ?: "Couldn't refresh")
+                        }
+                    }
+                },
+                onRemove = { removing = a })
+        }
 
         item {
             SectionTitle("Transfers", trailing = {
@@ -92,6 +121,20 @@ fun CloudScreen(c: AppContainer, state: AppState) {
         item { Spacer(Modifier.height(40.dp)) }
     }
 
+    if (adding) androidx.compose.ui.window.Dialog(onDismissRequest = { adding = false }) {
+        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = Nova.colors.surface) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Add a cloud account", style = MaterialTheme.typography.titleLarge)
+                Muted("You'll sign in on the provider's own page in your browser. Nova Files never sees your password.", maxLines = 3)
+                available.forEach { p ->
+                    NovaButton(p.label, providerIcon(p), Modifier.fillMaxWidth()) { adding = false; signIn(p) }
+                }
+                ProviderId.entries.filter { it !in available }.forEach { p -> Muted("${p.label} – ${plannedPhase(p).lowercase()}") }
+                NovaButton("Cancel", null, Modifier.fillMaxWidth()) { adding = false }
+            }
+        }
+    }
+
     removing?.let { a ->
         ConfirmDialog("Disconnect ${a.displayName}?",
             "Nova Files will forget this ${providerLabel(a)} account on this device: its stored sign-in and cached folder listings are deleted, and its unfinished transfers are cancelled.\n\nFiles you already downloaded stay on this device. Files in the cloud are not touched. Other accounts are not affected.",
@@ -106,13 +149,13 @@ fun CloudScreen(c: AppContainer, state: AppState) {
 }
 
 private fun plannedPhase(p: ProviderId) = when (p) {
-    ProviderId.GOOGLE_DRIVE, ProviderId.DROPBOX -> "Next update"
-    ProviderId.ONEDRIVE -> "Planned"
+    ProviderId.GOOGLE_DRIVE, ProviderId.DROPBOX -> "Not configured"
+    ProviderId.ONEDRIVE -> "Coming next"
     ProviderId.WEBDAV -> "Planned"
     ProviderId.MEGA -> "Under review"
 }
 
-private fun providerIcon(p: ProviderId): ImageVector = when (p) {
+internal fun providerIcon(p: ProviderId): ImageVector = when (p) {
     ProviderId.GOOGLE_DRIVE -> Icons.Rounded.AddToDrive
     ProviderId.DROPBOX -> Icons.Rounded.Inventory2
     ProviderId.ONEDRIVE -> Icons.Rounded.Cloud
@@ -123,9 +166,10 @@ private fun providerIcon(p: ProviderId): ImageVector = when (p) {
 private fun providerLabel(a: AccountEntity) = runCatching { ProviderId.valueOf(a.providerId).label }.getOrDefault(a.providerId)
 
 @Composable
-private fun AccountCard(a: AccountEntity, onRemove: () -> Unit) {
+private fun AccountCard(a: AccountEntity, onOpen: () -> Unit, onReconnect: () -> Unit, onRefresh: () -> Unit, onRemove: () -> Unit) {
     val p = runCatching { ProviderId.valueOf(a.providerId) }.getOrNull()
-    NovaCard(accent = Spectrum.Cloud) {
+    val ok = a.authStatus == AuthStatus.OK
+    NovaCard(accent = Spectrum.Cloud, onClick = if (ok) onOpen else onReconnect) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CategoryBadge(p?.let { providerIcon(it) } ?: Icons.Rounded.Cloud, Spectrum.Cloud, 44.dp)
             Spacer(Modifier.width(12.dp))
@@ -143,8 +187,15 @@ private fun AccountCard(a: AccountEntity, onRemove: () -> Unit) {
             Muted("${fmtSize(a.quotaUsed ?: 0)} of ${fmtSize(total)} used")
         }
         a.lastSyncAt?.let { Muted("Last synced " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))) }
+        if (!ok) { Spacer(Modifier.height(6.dp)); Muted("Sign-in expired or was revoked. Reconnect to continue – your transfers wait until then.", maxLines = 3) }
         Spacer(Modifier.height(10.dp))
-        NovaButton("Disconnect", Icons.Rounded.LinkOff, color = Spectrum.Danger, onClick = onRemove)
+        @OptIn(ExperimentalLayoutApi::class)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (ok) NovaButton("Open", Icons.Rounded.FolderOpen, primary = true, color = Spectrum.Cloud, onClick = onOpen)
+            else NovaButton("Reconnect", Icons.Rounded.Login, primary = true, color = Spectrum.Downloads, onClick = onReconnect)
+            if (ok) NovaButton("Refresh", Icons.Rounded.Refresh, onClick = onRefresh)
+            NovaButton("Disconnect", Icons.Rounded.LinkOff, color = Spectrum.Danger, onClick = onRemove)
+        }
     }
 }
 

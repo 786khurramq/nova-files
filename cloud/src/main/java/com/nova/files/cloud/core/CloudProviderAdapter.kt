@@ -57,6 +57,9 @@ interface CloudProviderAdapter {
     suspend fun thumbnail(session: AccountSession, item: CloudFile, px: Int): ByteArray? = null
     suspend fun changes(session: AccountSession, cursor: String?): ChangeSet = unsupported(Operation.CHANGE_TRACKING)
 
+    /** Best-effort revocation of the provider grant when an account is disconnected. */
+    suspend fun revoke(session: AccountSession, refreshToken: String?) {}
+
     private fun unsupported(op: Operation): Nothing = throw CloudException.Unsupported(op, "${providerId.label} doesn't support ${op.name.lowercase().replace('_', ' ')}")
 }
 

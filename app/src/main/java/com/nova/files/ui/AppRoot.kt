@@ -52,6 +52,7 @@ fun AppRoot(c: AppContainer, state: AppState, activity: Activity) {
         val snackbar = remember { SnackbarHostState() }
         val msg by c.transfers.messages.collectAsStateWithLifecycle()
         LaunchedEffect(msg) { msg?.let { snackbar.showSnackbar(it); c.transfers.consumeMessage() } }
+        LaunchedEffect(Unit) { c.cloud.notices.collect { c.transfers.toast(it) } }
 
         BackHandler(enabled = state.showSettings) { state.showSettings = false }
         BackHandler(enabled = !state.showSettings && state.tab != Tab.HOME && state.tab != Tab.FILES) { state.tab = Tab.HOME }

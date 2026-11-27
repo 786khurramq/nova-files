@@ -31,5 +31,10 @@ class AppState {
     /** Request for the Files screen to open a directory. */
     var openDir by mutableStateOf<File?>(null)
 
+    /** Cloud account currently open in the browser (null = account centre). */
+    var cloudAccount by mutableStateOf<String?>(null)
+    /** Last folder browsed per account: default upload destination from Files. accountId -> (folderId, name) */
+    val cloudFolders = androidx.compose.runtime.mutableStateMapOf<String, Pair<String?, String>>()
+
     fun openFolder(dir: File) { openDir = dir; tab = Tab.FILES; showSettings = false }
 }

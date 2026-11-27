@@ -105,6 +105,31 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- OAuth redirect targets. State + PKCE are validated before any code is exchanged. -->
+        <activity
+            android:name=".cloudui.OAuthRedirectActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Google: com.nova.files:/oauth2redirect -->
+                <data android:scheme="${applicationId}" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Dropbox: db-<app key>://1/connect -->
+                <data android:scheme="${dropboxScheme}" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".cloudui.CloudTransferJobService"
             android:exported="false"

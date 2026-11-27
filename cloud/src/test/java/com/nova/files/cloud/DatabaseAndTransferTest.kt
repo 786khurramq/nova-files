@@ -253,4 +253,57 @@ class DatabaseAndTransferTest {
         assertArrayEquals(bytes, File(out, "p.bin").readBytes())
     }
     private var currentId = ""
+
+    // ------------------------------------------------------------------ cloud transfers end to end
+
+    private fun md5(b: ByteArray) = java.security.MessageDigest.getInstance("MD5").digest(b).joinToString("") { "%02x".format(it) }
+
+    @Test fun uploadAndDownloadThroughQueueWithVerification() = runBlocking {
+        val server = MockWebServer().apply { start() }
+        val base = server.url("").toString().trimEnd('/')
+        val drive = com.nova.files.cloud.providers.google.GoogleDriveProvider(api = "$base/drive/v3", upload = "$base/upload/drive/v3")
+        val repo = AccountRepository(db, credentialStore(), CloudHttp(), mapOf(ProviderId.GOOGLE_DRIVE to drive))
+        val acct = repo.connect(ProviderId.GOOGLE_DRIVE, AccountProfile("perm-1", "Me", "me@gmail.com"), Credentials.OAuth("tok", "r", Long.MAX_VALUE))
+        val q = TransferQueue(db)
+        val engine = TransferEngine(q, CloudEndpointResolver(ctx, repo), retry = RetryPolicy(maxAttempts = 2, sleep = {}))
+        val data = "cloud bytes 123".toByteArray()
+
+        // Upload: local file → Drive folder F1
+        val local = File(tempDir("up"), "notes.txt").apply { writeBytes(data) }
+        server.enqueue(MockResponse().setBody("""{"files":[]}"""))
+        server.enqueue(MockResponse().setHeader("Location", server.url("/sess").toString()))
+        server.enqueue(MockResponse().setBody("""{"id":"N1","name":"notes.txt","size":"${data.size}","md5Checksum":"${md5(data)}"}"""))
+        val up = q.enqueue(TransferKind.COPY, Endpoint.Local(local.path), Endpoint.Cloud(acct.id, "GOOGLE_DRIVE", parentId = "F1"), "notes.txt", data.size.toLong())
+        engine.drain()
+        val u = q.get(up.id)!!
+        assertEquals(u.error, TransferState.COMPLETED, u.state)
+        assertTrue(u.resultJson!!.contains("cloud:${acct.id}:N1"))
+        assertEquals(acct.id, u.destAccountId)
+        repeat(3) { assertEquals("Bearer tok", server.takeRequest().getHeader("Authorization")) }
+
+        // Download with matching MD5
+        val out = tempDir("down"); registerDisk(out)
+        server.enqueue(MockResponse().setBody("""{"id":"B1","name":"photo.jpg","mimeType":"image/jpeg","size":"${data.size}","md5Checksum":"${md5(data)}"}"""))
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(data)))
+        val dl = q.enqueue(TransferKind.COPY, Endpoint.Cloud(acct.id, "GOOGLE_DRIVE", fileId = "B1"), Endpoint.Local(out.path), "photo.jpg", data.size.toLong())
+        engine.drain()
+        assertEquals(q.get(dl.id)!!.error, TransferState.COMPLETED, q.get(dl.id)!!.state)
+        assertArrayEquals(data, File(out, "photo.jpg").readBytes())
+
+        // Download whose bytes don't match the provider checksum is rejected and discarded.
+        server.enqueue(MockResponse().setBody("""{"id":"B2","name":"bad.jpg","mimeType":"image/jpeg","size":"${data.size}","md5Checksum":"${md5("other".toByteArray())}"}"""))
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(data)))
+        val bad = q.enqueue(TransferKind.COPY, Endpoint.Cloud(acct.id, "GOOGLE_DRIVE", fileId = "B2"), Endpoint.Local(out.path), "bad.jpg", data.size.toLong())
+        engine.drain()
+        val b = q.get(bad.id)!!
+        assertEquals(TransferState.FAILED, b.state); assertTrue(b.error!!.contains("Checksum"))
+        assertFalse(File(out, "bad.jpg").exists()); assertFalse(out.listFiles()!!.any { it.name.contains("bad.jpg") })
+
+        // Expired sign-in: job waits for re-authentication instead of failing permanently.
+        repo.markNeedsReconnect(acct.id)
+        val waiting = q.enqueue(TransferKind.COPY, Endpoint.Cloud(acct.id, "GOOGLE_DRIVE", fileId = "B1"), Endpoint.Local(out.path), "x.jpg", 1)
+        engine.drain()
+        assertEquals(TransferState.WAITING_AUTH, q.get(waiting.id)!!.state)
+        server.shutdown()
+    }
 }

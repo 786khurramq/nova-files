@@ -13,8 +13,13 @@ android {
         applicationId = "com.nova.files"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.0-cloud-foundation"
+        versionCode = 5
+        versionName = "0.3.0-drive-dropbox"
+        val googleClientId = (project.findProperty("nova.googleClientId") as String?).orEmpty()
+        val dropboxAppKey = (project.findProperty("nova.dropboxAppKey") as String?).orEmpty()
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
+        buildConfigField("String", "DROPBOX_APP_KEY", "\"$dropboxAppKey\"")
+        manifestPlaceholders["dropboxScheme"] = "db-$dropboxAppKey"
     }
 
     // Release key is NOT in git. Put nova-release.jks in the project root (or set NOVA_KEYSTORE),

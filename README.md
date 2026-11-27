@@ -71,3 +71,12 @@ Module `:cloud` (Android library, no UI):
 App: `cloudui/CloudRuntime` (wiring, Android 14+ user-initiated jobs for network transfers, dataSync service otherwise, WorkManager recovery notification), `cloudui/CloudScreen` (account centre + shared transfer queue). Wireless transfers are recorded in the same queue.
 
 Tests: `./gradlew :app:testDebugUnitTest :cloud:testDebugUnitTest`. Offline Robolectric: set `ROBOLECTRIC_DEPS` to a folder containing `android-all-instrumented-14-robolectric-10818077-i7.jar`.
+
+## Google Drive + Dropbox (Phase 2, v0.3.0)
+
+- OAuth 2.0 authorization code + PKCE in the system browser; redirects `com.nova.files:/oauth2redirect` (Google) and `db-<app key>://1/connect` (Dropbox) land in `OAuthRedirectActivity`; state is single-use and survives process death.
+- Client identifiers live in `gradle.properties` (`nova.googleClientId`, `nova.dropboxAppKey`). They are public identifiers; no client secret exists or is used.
+- Google Drive uses only `drive.file`: Nova Files sees files and folders it created/uploaded. Google Docs/Sheets/Slides are exported (PDF/DOCX/XLSX/PPTX). Deletes go to Drive trash.
+- Dropbox uses Full Dropbox access in development status; identity is the Dropbox file id. Upload sessions (8 MiB chunks) and Drive resumable sessions are checkpointed in the transfer queue and resumed after interruptions. Downloads use HTTP Range.
+- Integrity: Dropbox `content_hash` and Drive `md5Checksum` are verified after uploads and downloads; mismatches discard the copy.
+- Cloud thumbnails come from provider thumbnail endpoints through the existing thumbnail cache (key = account + file id + revision).

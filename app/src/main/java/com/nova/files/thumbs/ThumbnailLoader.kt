@@ -268,6 +268,40 @@ class ThumbnailLoader(private val ctx: Context) {
         return Thumb(b, null, false)
     }
 
+    // ------------------------------------------------------------------ cloud (provider-native thumbnails)
+
+    /** Cache key scoped to account + immutable id + revision, so accounts never share thumbnails and edits refresh. */
+    fun cloudKey(accountId: String, fileId: String, revision: String?, px: Int) =
+        FileFormats.cacheKey("cloud|$accountId|$fileId", 0, (revision ?: "").hashCode().toLong(), px)
+
+    fun peekCloud(key: String): Thumb? = mem.get(key)
+
+    /**
+     * Small provider thumbnail ([fetch] downloads only the provider's preview, never the full file),
+     * decoded with downsampling and stored in the same memory/disk caches as local thumbnails.
+     */
+    suspend fun loadCloud(key: String, px: Int, fill: Boolean, fetch: suspend () -> ByteArray?): Thumb? {
+        mem.get(key)?.let { return it }
+        if (none.get(key) == true) return null
+        val job = synchronized(inflight) {
+            inflight[key]?.also { it.waiters++ } ?: Job(scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                try {
+                    readDisk(key)?.let { mem.put(key, it); return@async it }
+                    if (File(dir, "$key.none").exists()) { none.put(key, true); return@async null }
+                    val bytes = try { fetch() } catch (e: Exception) { null }    // rate limits / errors → fallback icon, retried next session
+                    val bmp = bytes?.let { runCatching { decodeBytes(it, px) }.getOrNull() }
+                    if (bmp == null) { if (bytes != null) { none.put(key, true); runCatching { File(dir, "$key.none").createNewFile() } }; null }
+                    else Thumb(bmp, null, fill).also { writeDisk(key, it); mem.put(key, it) }
+                } finally { synchronized(inflight) { inflight.remove(key) } }
+            }, 1).also { inflight[key] = it; it.deferred.start() }
+        }
+        try { return job.deferred.await() }
+        catch (e: kotlinx.coroutines.CancellationException) {
+            synchronized(inflight) { if (--job.waiters <= 0) { job.deferred.cancel(); inflight.remove(key) } }
+            throw e
+        }
+    }
+
     // ------------------------------------------------------------------ external content (content://)
 
     /** For files from other apps: the provider's own thumbnail (MediaStore, Downloads, documents). */

@@ -59,12 +59,23 @@ class AccountRepository(
             AccountEntity(id, providerId.name, profile.providerAccountId, profile.displayName, profile.email, profile.avatarUrl,
                 AuthStatus.OK, ConnectionStatus.ONLINE, null, null, null, now, config, credentialRef = "acct:$id").also { db.accounts().insert(it) }
         }
-        credentials.put(entity.credentialRef, creds)
+        // Some providers (e.g. Google on reconnect) don't re-issue a refresh token: keep the existing one.
+        val toStore = if (creds is Credentials.OAuth && creds.refreshToken == null && existing != null)
+            (credentials.get(existing.credentialRef) as? CredentialResult.Ok)?.credentials?.let { old -> (old as? Credentials.OAuth)?.refreshToken }?.let { creds.copy(refreshToken = it) } ?: creds
+        else creds
+        credentials.put(entity.credentialRef, toStore)
         synchronized(tokenProviders) { tokenProviders.remove(entity.id)?.forget() }
         return entity
     }
 
     suspend fun markNeedsReconnect(accountId: String) = db.accounts().setAuth(accountId, AuthStatus.NEEDS_RECONNECT)
+
+    /** Updates display name/email/avatar after a refresh, keeping identity unchanged. */
+    suspend fun updateProfile(accountId: String, p: AccountProfile) {
+        val a = db.accounts().byId(accountId) ?: return
+        if (a.providerAccountId != p.providerAccountId) return
+        db.accounts().update(a.copy(displayName = p.displayName, email = p.email, avatarUrl = p.avatarUrl))
+    }
 
     suspend fun updateQuota(accountId: String, used: Long?, total: Long?) = db.accounts().setQuota(accountId, used, total, System.currentTimeMillis())
 
@@ -72,8 +83,13 @@ class AccountRepository(
      * Disconnects one account: cancels ITS pending transfers, deletes ITS cached metadata (cascade)
      * and ITS credentials. Local files and other accounts are untouched.
      */
-    suspend fun remove(accountId: String): RemovalReport {
+    suspend fun remove(accountId: String, revoke: Boolean = true): RemovalReport {
         val acct = db.accounts().byId(accountId) ?: return RemovalReport(0, 0)
+        if (revoke) runCatching {
+            val p = providers[ProviderId.valueOf(acct.providerId)]
+            val rt = ((credentials.get(acct.credentialRef) as? CredentialResult.Ok)?.credentials as? Credentials.OAuth)?.refreshToken
+            if (p != null) kotlinx.coroutines.withTimeoutOrNull(8000) { p.revoke(session(accountId), rt) }
+        }
         val pending = db.transfers().pendingForAccount(accountId)
         val now = System.currentTimeMillis()
         pending.forEach { db.transfers().setState(it.id, TransferState.CANCELLED, "Account disconnected", now) }

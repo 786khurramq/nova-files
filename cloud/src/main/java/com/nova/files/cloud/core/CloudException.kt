@@ -21,4 +21,7 @@ sealed class CloudException(val userMessage: String, cause: Throwable? = null, v
     class InsufficientStorage(needed: Long, free: Long) : CloudException("Not enough space on this device (needs ${needed / 1048576} MB, ${free / 1048576} MB free)")
     class CredentialsUnavailable(val accountId: String) : CloudException("Stored sign-in couldn't be read – reconnect this account")
     class Http(val code: Int, detail: String) : CloudException(detail)
+    /** A provider upload session is no longer valid; the upload restarts from the beginning. */
+    class UploadSessionExpired : CloudException("Upload session expired – restarting")
+    class OffsetMismatch(val correct: Long?) : CloudException("Upload position mismatch", retryable = true)
 }

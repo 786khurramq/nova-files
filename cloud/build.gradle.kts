@@ -39,7 +39,7 @@ ksp {
 
 dependencies {
     val room = "2.7.2"
-    implementation("androidx.room:room-runtime:$room")
+    api("androidx.room:room-runtime:$room")
     implementation("androidx.room:room-ktx:$room")
     ksp("androidx.room:room-compiler:$room")
     api("com.squareup.okhttp3:okhttp:4.12.0")

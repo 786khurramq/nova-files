@@ -106,6 +106,7 @@ class TransferEngine(
             val source = resolver.source(srcE)
             val dest = resolver.destination(dstE)
             val policy = runCatching { ConflictPolicy.valueOf(job.conflictPolicy) }.getOrDefault(ConflictPolicy.KEEP_BOTH)
+            if (dest is UploadDestination) { uploadOnce(job, source, dest, policy, control); return@withContext }
             var writer = dest.prepare(job.name, source.size, policy, job.checkpointJson)
                 ?: run {
                     queue.update(job.copy(state = TransferState.COMPLETED, error = null, resultJson = EndpointJson.encodeToString(CommittedResult.serializer(), CommittedResult("", job.name, skipped = true))))
@@ -117,6 +118,7 @@ class TransferEngine(
             queue.progress(job.id, start, writer.checkpoint(), force = true)
 
             val md = if (start == 0L) MessageDigest.getInstance("SHA-256") else null
+            val verify = if (start == 0L && source.knownHashes.isNotEmpty()) com.nova.files.cloud.core.MultiHasher(source.knownHashes.keys) else null
             var done = start
             var windowStart = System.nanoTime(); var windowBytes = 0L; var rate = 0L
             try {
@@ -128,7 +130,7 @@ class TransferEngine(
                         val r = input.read(buf)
                         if (r < 0) break
                         writer.stream.write(buf, 0, r)
-                        md?.update(buf, 0, r)
+                        md?.update(buf, 0, r); verify?.update(buf, 0, r)
                         done += r; windowBytes += r
                         val now = System.nanoTime()
                         if (now - windowStart > 1_000_000_000L) { rate = windowBytes * 1_000_000_000L / (now - windowStart); windowStart = now; windowBytes = 0 }
@@ -151,6 +153,11 @@ class TransferEngine(
 
             source.size?.let { expected ->
                 if (done != expected) { writer.abort(false); throw CloudException.Integrity("Incomplete transfer: got $done of $expected bytes") }
+            }
+            verify?.results()?.let { actual ->
+                com.nova.files.cloud.core.MultiHasher.mismatch(source.knownHashes, actual)?.let { alg ->
+                    writer.abort(false); throw CloudException.Integrity("Checksum mismatch (${alg.name}) – the download was corrupt and has been discarded")
+                }
             }
             val result = writer.commit()
             val sha = md?.let { hex(it.digest()) } ?: result.location.takeIf { File(it).isFile }?.let { sha256File(File(it)) }
@@ -175,6 +182,35 @@ class TransferEngine(
             onWaitingForNetwork()
             throw CloudException.Network(e)
         }
+    }
+
+    /** Cloud uploads: the provider pulls bytes from the source and owns resumability (upload sessions). */
+    private suspend fun uploadOnce(job: TransferEntity, source: TransferSource, dest: UploadDestination, policy: ConflictPolicy, control: Control) {
+        queue.setState(job.id, TransferState.RUNNING, if (job.checkpointJson != null) "Resuming upload" else null)
+        var done = 0L
+        var checkpoint = job.checkpointJson
+        var windowStart = System.nanoTime(); var windowBytes = 0L; var rate = 0L
+        val result = try {
+            dest.upload(source, job.name, policy, checkpoint,
+                onProgress = { n ->
+                    if (control.cancel) throw Stopped(false)
+                    if (control.pause) throw Stopped(true)
+                    done = (done + n).coerceAtLeast(0); windowBytes += n
+                    val now = System.nanoTime()
+                    if (now - windowStart > 1_000_000_000L) { rate = windowBytes * 1_000_000_000L / (now - windowStart); windowStart = now; windowBytes = 0 }
+                    _live.update { it + (job.id to LiveProgress(job.id, done, source.size, rate)) }
+                },
+                onCheckpoint = { cp -> checkpoint = cp; kotlinx.coroutines.runBlocking { queue.progress(job.id, done, cp) } })
+        } catch (e: Stopped) {
+            queue.progress(job.id, done, if (e.pause) checkpoint else null, force = true)
+            throw e
+        } catch (e: Exception) {
+            queue.progress(job.id, done, checkpoint, force = true)
+            throw e
+        }
+        val latest = queue.get(job.id) ?: job
+        queue.update(latest.copy(state = TransferState.COMPLETED, bytesDone = done, error = null, checkpointJson = null, name = result.name,
+            resultJson = EndpointJson.encodeToString(CommittedResult.serializer(), result)))
     }
 
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }

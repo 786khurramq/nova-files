@@ -48,10 +48,18 @@ class CloudRuntime(private val app: Context, scope: CoroutineScope) {
     val credentials = CredentialStore(app.cloudCredentials, AndroidKeystoreKeyProvider())
     val pendingAuth = PendingAuthStore(credentials)
     val http = CloudHttp()
-    /** Providers register here from Phase 2 onwards; none are shipped in Phase 1. */
-    val accounts = AccountRepository(db, credentials, http, providers = emptyMap())
+    val providers: Map<com.nova.files.cloud.core.ProviderId, com.nova.files.cloud.core.CloudProviderAdapter> = mapOf(
+        com.nova.files.cloud.core.ProviderId.GOOGLE_DRIVE to com.nova.files.cloud.providers.google.GoogleDriveProvider(),
+        com.nova.files.cloud.core.ProviderId.DROPBOX to com.nova.files.cloud.providers.dropbox.DropboxProvider(),
+    )
+    private val messages = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
+    /** Sign-in results and other cloud notices for the UI. */
+    val notices: kotlinx.coroutines.flow.SharedFlow<String> = messages
+    val auth: CloudAuth = CloudAuth(app, scope, http, pendingAuth, { accounts }, providers) { messages.tryEmit(it) }
+    val accounts = AccountRepository(db, credentials, http, providers = providers.filterKeys { it in auth.configs },
+        refreshers = auth.configs.keys.mapNotNull { p -> auth.refresher(p)?.let { p to it } }.toMap())
     val queue = TransferQueue(db)
-    val engine = TransferEngine(queue, LocalEndpointResolver(app), onWaitingForNetwork = { RecoveryWorker.schedule(app) })
+    val engine = TransferEngine(queue, com.nova.files.cloud.transfer.CloudEndpointResolver(app, accounts), onWaitingForNetwork = { RecoveryWorker.schedule(app) })
 
     init {
         scope.launch(Dispatchers.IO) {

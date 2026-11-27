@@ -18,7 +18,10 @@ sealed class Endpoint {
     /** A Storage Access Framework tree (destination folder) chosen by the user. */
     @Serializable @SerialName("saf") data class SafTree(val treeUri: String) : Endpoint()
     /** A cloud object (source: fileId) or cloud folder (destination: parentId). */
-    @Serializable @SerialName("cloud") data class Cloud(val accountId: String, val provider: String, val fileId: String? = null, val parentId: String? = null, val revision: String? = null) : Endpoint()
+    @Serializable @SerialName("cloud") data class Cloud(
+        val accountId: String, val provider: String, val fileId: String? = null, val parentId: String? = null,
+        val revision: String? = null, val exportMime: String? = null, val parentName: String? = null,
+    ) : Endpoint()
     /** A Nova Files device reached over the existing encrypted wireless link. */
     @Serializable @SerialName("wireless") data class Wireless(val deviceId: String, val deviceName: String) : Endpoint()
 
@@ -60,6 +63,17 @@ interface TransferDestination {
     val supportsResume: Boolean
     /** Returns null if [conflict] is SKIP and the target exists. Throws Conflict if ASK and it exists. */
     fun prepare(name: String, size: Long?, conflict: ConflictPolicy, checkpoint: String?): DestinationWriter?
+}
+
+/**
+ * Destinations that pull bytes from the source themselves (cloud upload APIs). The engine hands over
+ * the source; progress is reported as increments and resume points as serialised checkpoints.
+ */
+interface UploadDestination : TransferDestination {
+    suspend fun upload(source: TransferSource, name: String, conflict: com.nova.files.cloud.core.ConflictPolicy, checkpoint: String?,
+                       onProgress: (Long) -> Unit, onCheckpoint: (String) -> Unit): CommittedResult
+    override fun prepare(name: String, size: Long?, conflict: com.nova.files.cloud.core.ConflictPolicy, checkpoint: String?): DestinationWriter? =
+        throw UnsupportedOperationException()
 }
 
 /** Maps endpoints to adapters. Cloud providers register here in later phases. */
