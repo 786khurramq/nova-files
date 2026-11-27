@@ -22,6 +22,7 @@ class AppContainer(app: Application) {
     val identity = AndroidIdentityKey()
     val trust = TrustStore(app)
     val history = HistoryStore(app)
+    val thumbs = com.nova.files.thumbs.ThumbnailLoader(app)
     val transfers = TransferManager(app, scope, settings, profile, identity, trust, history)
 }
 

@@ -19,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -176,10 +178,10 @@ fun FilesScreen(c: AppContainer, state: AppState, activity: Activity) {
                 !loading && entries.isEmpty() -> EmptyState(Icons.Rounded.FolderOpen, "Empty folder", if (!settings.showHidden) "Hidden files are not shown" else "")
                 settings.gridView -> LazyVerticalGrid(GridCells.Adaptive(if (c.profile.isTv) 170.dp else 110.dp), contentPadding = PaddingValues(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(entries, key = { it.path }) { e -> GridItem(e, e.path in selection, { click(e) }, { toggle(e) }) }
+                    items(entries, key = { it.path }) { e -> GridItem(c.thumbs, e, e.path in selection, { click(e) }, { toggle(e) }) }
                 }
                 else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(entries, key = { it.path }) { e -> ListItemRow(e, e.path in selection, { click(e) }, { toggle(e) }) }
+                    items(entries, key = { it.path }) { e -> ListItemRow(c.thumbs, e, e.path in selection, { click(e) }, { toggle(e) }) }
                 }
             }
         }
@@ -245,26 +247,33 @@ private fun PermissionBanner(onGrant: () -> Unit) {
 }
 
 @Composable
-private fun ListItemRow(e: FileEntry, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+private fun ListItemRow(loader: com.nova.files.thumbs.ThumbnailLoader, e: FileEntry, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+    val thumb by rememberThumb(loader, e.file, e.isDir, e.modified, e.size, 40.dp)
     NovaCard(onClick = onClick, onLongClick = onLong, selected = selected, padding = PaddingValues(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(16.dp), accent = Spectrum.forCategory(e.category)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CategoryBadge(if (selected) Icons.Rounded.Check else iconFor(e.category), Spectrum.forCategory(e.category), 40.dp)
+            FileThumb(e.file, e.isDir, thumb, 40.dp, selected)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(e.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-                Muted((if (e.isDir) "Folder" else fmtSize(e.size)) + " · " + DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(e.modified)), maxLines = 1)
+                Muted(listOfNotNull(thumb?.detail, if (e.isDir) "Folder" else fmtSize(e.size), DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(e.modified))).joinToString(" · "), maxLines = 1)
             }
         }
     }
 }
 
 @Composable
-private fun GridItem(e: FileEntry, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
-    NovaCard(onClick = onClick, onLongClick = onLong, selected = selected, padding = PaddingValues(12.dp), accent = Spectrum.forCategory(e.category)) {
-        CategoryBadge(if (selected) Icons.Rounded.Check else iconFor(e.category), Spectrum.forCategory(e.category), 52.dp)
-        Spacer(Modifier.height(10.dp))
+private fun GridItem(loader: com.nova.files.thumbs.ThumbnailLoader, e: FileEntry, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+    val thumb by rememberThumb(loader, e.file, e.isDir, e.modified, e.size, 160.dp)
+    NovaCard(onClick = onClick, onLongClick = onLong, selected = selected, padding = PaddingValues(10.dp), accent = Spectrum.forCategory(e.category)) {
+        // Fixed square preview area: photos/videos are centre-cropped, icons and pages fitted whole.
+        BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(Nova.colors.surfaceHigh), contentAlignment = Alignment.Center) {
+            val t = thumb
+            if (t?.bitmap != null && t.fill) FileThumb(e.file, e.isDir, t, maxWidth, selected)
+            else FileThumb(e.file, e.isDir, t, if (t?.bitmap != null) maxWidth * 0.82f else maxWidth * 0.5f, selected)
+        }
+        Spacer(Modifier.height(8.dp))
         Text(e.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Muted(if (e.isDir) "Folder" else fmtSize(e.size), maxLines = 1)
+        Muted(thumb?.detail ?: if (e.isDir) "Folder" else fmtSize(e.size), maxLines = 1)
     }
 }
 

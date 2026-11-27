@@ -92,7 +92,8 @@ fun HomeScreen(c: AppContainer, state: AppState) {
                 val cat = FileTypes.category(f.name, f.isDirectory)
                 NovaCard(onClick = { c.files.open(f)?.let { c.transfers.toast(it) } }, accent = Spectrum.forCategory(cat), padding = PaddingValues(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CategoryBadge(iconFor(cat), Spectrum.forCategory(cat), 36.dp)
+                        val thumb by rememberThumb(c.thumbs, f, false, f.lastModified(), f.length(), 36.dp)
+                        FileThumb(f, false, thumb, 36.dp)
                         Spacer(Modifier.width(10.dp))
                         Column { Text(f.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1); Muted(fmtSize(f.length()), maxLines = 1) }
                     }

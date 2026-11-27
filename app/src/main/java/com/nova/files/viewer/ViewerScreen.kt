@@ -80,7 +80,11 @@ fun ViewerScreen(act: FileViewerActivity, c: AppContainer, f: ExternalFile?, err
                 NovaIconButton(Icons.Rounded.Close, "Close") { act.finish() }
                 Spacer(Modifier.width(8.dp))
                 if (f != null) {
-                    CategoryBadge(kindIcon(f.kind), kindColor(f.kind), 36.dp)
+                    val ext by produceState<android.graphics.Bitmap?>(null, f.uri) { value = c.thumbs.loadExternal(f.uri, 144) }
+                    val b = ext
+                    if (b != null) androidx.compose.foundation.Image(remember(b) { b.asImageBitmap() }, null, contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)))
+                    else FormatBadge(remember(f.name) { com.nova.files.thumbs.FileFormats.of(f.name) }, 36.dp)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(f.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)
